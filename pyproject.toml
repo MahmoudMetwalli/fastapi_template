@@ -1,0 +1,179 @@
+[project]
+name = "fastapi-ddd-template"
+version = "0.1.0"
+description = "FastAPI service template built around Domain-Driven Design and Clean Architecture."
+readme = "README.md"
+authors = [
+    { name = "MahmoudMetwalli", email = "mammkbih@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "abxbus>=2.5.56",
+    "alembic>=1.20.0",
+    "asyncpg>=0.31.0",
+    "dependency-injector[pydantic2]>=4.49.1",
+    "fastapi[standard]>=0.141.1",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy[asyncio]>=2.0.54",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.16,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+module-root = "src"
+
+[tool.pytest.ini_options]
+pythonpath = []
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# Both must be "session", not just the fixture scope: the `engine` fixture
+# is session-scoped and its asyncpg connections are bound to whichever
+# event loop was running when they were created. With only
+# `asyncio_default_fixture_loop_scope` set, each *test* still got its own
+# per-function loop by default, and every test after the first hit asyncpg
+# with "Future attached to a different loop" (verified empirically).
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+addopts = "-q --strict-markers --strict-config"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "DTZ", "T20", "SIM", "PTH", "RUF"]
+# "TC" (flake8-type-checking) is deliberately excluded: it wants every
+# domain-layer import that's used only in annotations moved into
+# `if TYPE_CHECKING:` blocks, which would hide exactly the imports several
+# docstrings in this template point at as evidence of the architecture
+# (e.g. "this is the only module that imports both `Book` and `BookRow`").
+# Worth the import-time/cycle-avoidance cost it buys in a large codebase;
+# not worth it here.
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+# abxbus ships no py.typed marker, so mypy treats its exports as `Any`.
+# This only silences the "missing library stubs" noise at each import site
+# — it does NOT bypass `disallow_subclassing_any` (part of `strict`), which
+# still correctly flags `class DomainEventEnvelope(BaseEvent)` in
+# shared/infrastructure/events.py, the one place that subclass happens;
+# see the `type: ignore[misc]` there for why that one is accepted.
+module = "abxbus.*"
+ignore_missing_imports = true
+
+[tool.importlinter]
+root_package = "app"
+# Required for the "forbidden" contract below, which lists third-party
+# packages (sqlalchemy, fastapi, ...) rather than only internal modules.
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Catalog layers point inward"
+type = "layers"
+layers = ["presentation", "infrastructure", "application", "domain"]
+containers = ["app.contexts.catalog"]
+# `published` deliberately isn't in this list: it's not one of catalog's
+# own internal layers, it's catalog's outward-facing contract for *other*
+# contexts (see `catalog/published/lookup.py`). Nothing inside catalog is
+# expected to import it, so it has no "points inward" position to check —
+# the two contracts below govern who may depend on it instead.
+
+[[tool.importlinter.contracts]]
+name = "Ordering layers point inward"
+type = "layers"
+layers = ["presentation", "infrastructure", "application", "domain"]
+containers = ["app.contexts.ordering"]
+
+[[tool.importlinter.contracts]]
+# `app.shared` has no `application` layer — nothing needs one (there is no
+# generic Unit of Work/use-case base left to put there; see the project's
+# unit_of_work.py history). A separate, smaller contract rather than
+# stretching one `layers` list across containers with different shapes.
+name = "Shared kernel layers point inward"
+type = "layers"
+layers = ["presentation", "infrastructure", "domain"]
+containers = ["app.shared"]
+
+[[tool.importlinter.contracts]]
+name = "Domain is framework-free"
+type = "forbidden"
+source_modules = [
+    "app.contexts.catalog.domain",
+    "app.contexts.ordering.domain",
+    "app.shared.domain",
+]
+forbidden_modules = ["sqlalchemy", "fastapi", "pydantic", "dependency_injector", "starlette"]
+
+[[tool.importlinter.contracts]]
+# The Context Map relationship between the two contexts, enforced
+# mechanically rather than left as a comment someone has to remember:
+# `ordering` (the downstream/customer context) may depend on `catalog`'s
+# (the upstream/supplier context's) published interface — the Anti-
+# Corruption Layer at `ordering/infrastructure/catalog_acl.py` is the one
+# module that does — but never on catalog's domain, application internals,
+# or infrastructure. `catalog.published` is the one name deliberately
+# absent from `forbidden_modules` below.
+#
+# `presentation` is deliberately left out of both `source_modules` here and
+# `forbidden_modules` in "Catalog does not depend on ordering" below: every
+# context's router imports `app.containers` for `Provide[Container...]`
+# (see `presentation/router.py` in either context), and `Container` itself
+# necessarily imports every context to wire it — so import-linter's own
+# transitive-path check would otherwise flag `ordering.presentation ->
+# app.containers -> catalog...` as ordering depending on catalog, and
+# symmetrically the other way, no matter how independent the two contexts'
+# actual domain/application code is. That transitive edge is a property of
+# having one shared composition root, not a context boundary violation;
+# scoping these two contracts to `domain`/`application`/`infrastructure` is
+# what makes them check the thing they're actually meant to check. See
+# `docs/ddd-concepts.md`'s "Context Map" section for this caveat spelled
+# out in full — it's a limitation worth knowing before trusting any
+# import-linter contract's silence as a full guarantee.
+name = "Ordering may only depend on catalog's published interface"
+type = "forbidden"
+source_modules = [
+    "app.contexts.ordering.domain",
+    "app.contexts.ordering.application",
+    "app.contexts.ordering.infrastructure",
+]
+forbidden_modules = [
+    "app.contexts.catalog.domain",
+    "app.contexts.catalog.application",
+    "app.contexts.catalog.infrastructure",
+]
+
+[[tool.importlinter.contracts]]
+# The other direction of the same relationship: `catalog` is the upstream
+# context here and must stay usable without `ordering` existing at all —
+# it must never import anything from `ordering`, published or otherwise.
+name = "Catalog does not depend on ordering"
+type = "forbidden"
+source_modules = [
+    "app.contexts.catalog.domain",
+    "app.contexts.catalog.application",
+    "app.contexts.catalog.infrastructure",
+]
+forbidden_modules = ["app.contexts.ordering"]
+
+[dependency-groups]
+dev = [
+    "asgi-lifespan>=2.1.0",
+    "httpx>=0.28.1",
+    "import-linter>=2.15",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.8",
+    "testcontainers[postgres]>=4.15.0",
+]
