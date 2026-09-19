@@ -19,8 +19,18 @@ today just `books`, but if `catalog` ever grows a second aggregate (and
 its own repository), that repository joins this same port. That's the
 answer to "what about atomicity across multiple repositories" for a
 context that, so far, only has one.
+
+`@abstractmethod` on `books` too, not just the two dunder methods — see
+`application/ports/book_repository.py`'s docstring for why every port in
+this template does this. One consequence worth knowing:
+`SqlAlchemyCatalogTransaction.books` (and its test fake) must be a real
+`@property`, not a plain instance attribute set in `__aenter__` — verified
+empirically that `ABCMeta` computes abstractness from the *class*, before
+any instance exists, so a same-named instance attribute doesn't satisfy an
+abstract property and the class would refuse to instantiate at all.
 """
 
+from abc import abstractmethod
 from types import TracebackType
 from typing import Protocol, Self
 
@@ -29,10 +39,13 @@ from app.contexts.catalog.application.ports.book_repository import BookRepositor
 
 class CatalogTransaction(Protocol):
     @property
+    @abstractmethod
     def books(self) -> BookRepository: ...
 
+    @abstractmethod
     async def __aenter__(self) -> Self: ...
 
+    @abstractmethod
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,

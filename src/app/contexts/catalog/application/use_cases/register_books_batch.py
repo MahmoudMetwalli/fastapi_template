@@ -18,8 +18,6 @@ way. Injecting the resolved object directly removes that ambiguity
 entirely rather than working around it.
 """
 
-from typing import TYPE_CHECKING
-
 from abxbus import EventBus
 
 from app.contexts.catalog.application.commands import RegisterBooksBatchCommand
@@ -33,7 +31,7 @@ from app.shared.infrastructure.events import publish
 
 
 @command_handler(RegisterBooksBatchCommand)
-class RegisterBooksBatchUseCase:
+class RegisterBooksBatchUseCase(CommandHandler[RegisterBooksBatchCommand, list[BookId]]):
     def __init__(self, transaction: CatalogTransaction, event_bus: EventBus) -> None:
         self._transaction = transaction
         self._event_bus = event_bus
@@ -62,9 +60,3 @@ class RegisterBooksBatchUseCase:
                 await publish(self._event_bus, event)
 
         return [book.id for book in books]
-
-
-if TYPE_CHECKING:
-    _conforms_to_command_handler: type[CommandHandler[RegisterBooksBatchCommand, list[BookId]]] = (
-        RegisterBooksBatchUseCase
-    )

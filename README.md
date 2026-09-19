@@ -237,17 +237,34 @@ not incidental ceremony.
   collaborator constructor call at the exact point its argument exists is
   the boundary of what dependency injection can do, not a shortcut around
   it.
-- **Ports are `typing.Protocol`, not ABC**, and are never explicitly
-  subclassed by their implementations — see the comments in
-  `application/ports/*.py`. mypy checks Protocol conformance at the *use
-  site*, not at the implementation's definition, so each infrastructure
-  module ends with a `if TYPE_CHECKING: _: type[Port] = Implementation`
-  line that closes that gap. Port attributes (not just methods) are
-  declared as read-only `@property`, not plain fields — mypy treats a
-  Protocol's plain attribute as invariant (read-write), which fails
-  structurally the moment an implementation's attribute is a subtype of
-  the port's declared type; a read-only property is covariant instead
-  (verified with a minimal repro).
+- **Ports are `typing.Protocol` with `@abstractmethod` members, explicitly
+  subclassed by every implementation and test fake** — e.g. `class
+  SqlAlchemyBookRepository(SqlAlchemySessionScoped, BookRepository):`. This
+  wasn't the original design: a purely structural Protocol, never
+  subclassed, was tried first, with an `if TYPE_CHECKING: _: type[Port] =
+  Implementation` line in each implementation module to close the gap it
+  leaves (mypy checks Protocol conformance at the *use site*, not the
+  implementation's definition — and the DI container is never a real use
+  site, since `Factory`'s kwargs are typed `Any`, so an implementation with
+  a wrong method signature passed `mypy --strict` silently — verified by
+  deliberately breaking one). That line only helps if someone remembers to
+  write it for every implementation, so it's not there any more: explicit
+  inheritance from an `@abstractmethod`-based Protocol gets equivalent
+  safety automatically — a wrong signature on an override is now a `mypy`
+  error at the implementation's own definition, and a forgotten override
+  raises `TypeError` the instant anything constructs the class, both
+  verified empirically (the same broken-signature experiment, before and
+  after this change). The one real gotcha: an abstract `@property` (like
+  `CatalogTransaction.books`) isn't satisfied by a same-named plain
+  instance attribute set in `__aenter__` — `ABCMeta` computes abstractness
+  from the class before any instance exists, so `SqlAlchemyCatalogTransaction`
+  and its test fake implement `books` as a real property backed by a
+  private attribute instead. Port attributes are still declared as
+  read-only `@property`, not plain fields, for the same covariance reason
+  as before — mypy treats a Protocol's plain attribute as invariant
+  (read-write), which fails structurally the moment an implementation's
+  attribute is a subtype of the port's declared type (verified with a
+  minimal repro).
 - **No `map_imperatively`.** ORM rows (`*Row` in `infrastructure/persistence
   /models.py`) and domain aggregates are mapped by hand in `mappers.py`.
   Costs a little boilerplate per aggregate; buys a domain layer that is
@@ -280,8 +297,10 @@ not incidental ceremony.
   (`Command[R]`/`Query[R]` carry it as a type parameter); the decorator
   itself can't statically verify the handler's signature though — a known
   mypy limitation for generic decorator factories, verified empirically —
-  so each handler keeps the same `if TYPE_CHECKING: _conforms...` line
-  every port in this template already uses. Forgetting the decorator, or
+  so each use case explicitly inherits its specific `CommandHandler[X, R]`/
+  `QueryHandler[X, R]` too (e.g. `class RegisterBookUseCase(CommandHandler
+  [RegisterBookCommand, BookId]):`), the same enforced-conformance pattern
+  every port in this template uses. Forgetting the decorator, or
   registering two handlers for one command, raises a clear error at
   container-build time, not a bare `KeyError` at request time. Both buses
   are `Factory`, not `Singleton`, deliberately: `RegisterBooksBatchUseCase`

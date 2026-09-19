@@ -20,11 +20,14 @@ leaks into `ordering`'s domain the moment it's more convenient to reuse
 `CatalogBookSummary` (or `catalog`'s `Book` aggregate) directly instead of
 maintaining `OrderedBookSnapshot`.
 
+Explicitly subclasses `BookCatalog` — see `catalog`'s
+`application/ports/book_repository.py` docstring for why every port in
+this template does this rather than relying on structural typing alone.
+
 See `docs/ddd-concepts.md` for the concept this class and
 `ports/book_catalog.py` demonstrate together.
 """
 
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from app.contexts.catalog.published.lookup import CatalogLookup
@@ -32,7 +35,7 @@ from app.contexts.ordering.application.ports.book_catalog import BookCatalog
 from app.contexts.ordering.domain.value_objects import OrderedBookSnapshot
 
 
-class CatalogAntiCorruptionLayer:
+class CatalogAntiCorruptionLayer(BookCatalog):
     def __init__(self, catalog_lookup: CatalogLookup) -> None:
         self._catalog_lookup = catalog_lookup
 
@@ -45,7 +48,3 @@ class CatalogAntiCorruptionLayer:
             title=summary.title,
             unit_price_cents=summary.price_cents,
         )
-
-
-if TYPE_CHECKING:
-    _conforms_to_book_catalog: type[BookCatalog] = CatalogAntiCorruptionLayer

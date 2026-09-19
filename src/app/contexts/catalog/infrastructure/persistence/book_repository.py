@@ -8,9 +8,10 @@ by `SqlAlchemyCatalogTransaction` (`transaction.py`), for the one use case
 (`RegisterBooksBatchUseCase`) that needs several `add()` calls to commit or
 roll back as a single atomic unit — something the default strategy cannot
 provide, since each call would be its own transaction.
-"""
 
-from typing import TYPE_CHECKING
+Explicitly subclasses `BookRepository`, an `@abstractmethod`-based
+Protocol — see that port's docstring for why this isn't purely structural.
+"""
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -23,7 +24,7 @@ from app.contexts.catalog.infrastructure.persistence.models import BookRow
 from app.shared.infrastructure.database.session_scoped import SqlAlchemySessionScoped
 
 
-class SqlAlchemyBookRepository(SqlAlchemySessionScoped):
+class SqlAlchemyBookRepository(SqlAlchemySessionScoped, BookRepository):
     async def get(self, book_id: BookId) -> Book | None:
         async with self._strategy.session() as session:
             row = await session.get(BookRow, book_id.value)
@@ -62,12 +63,3 @@ class SqlAlchemyBookRepository(SqlAlchemySessionScoped):
             if row is None:
                 raise BookNotFoundError(book.id)
             apply_to_row(book, row)
-
-
-if TYPE_CHECKING:
-    # Closes the mypy use-site gap documented in the project plan: this
-    # class is never explicitly subclassed from `BookRepository` (see
-    # "Ports: Protocol or ABC?"), so without this line a signature mismatch
-    # between the two would go unnoticed until something actually tries to
-    # use it as a `BookRepository`.
-    _conforms_to_book_repository: type[BookRepository] = SqlAlchemyBookRepository

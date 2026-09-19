@@ -14,12 +14,13 @@ left off that list. Nothing inside `catalog` itself is expected to import
 this package; it exists for consumers on the other side of the context
 boundary.
 
-A `Protocol`, like every other port in this template (see
-`application/ports/book_repository.py`) — its implementation
-(`infrastructure/persistence/catalog_lookup.py`) is never an explicit
-subclass.
+A `Protocol` with an `@abstractmethod` member, like every other port in
+this template (see `application/ports/book_repository.py`) — its
+implementation (`infrastructure/persistence/catalog_lookup.py`) explicitly
+subclasses it.
 """
 
+from abc import abstractmethod
 from typing import Protocol
 from uuid import UUID
 
@@ -27,4 +28,5 @@ from app.contexts.catalog.published.dtos import CatalogBookSummary
 
 
 class CatalogLookup(Protocol):
+    @abstractmethod
     async def find_book_summary(self, book_id: UUID) -> CatalogBookSummary | None: ...

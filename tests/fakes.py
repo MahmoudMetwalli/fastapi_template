@@ -1,12 +1,14 @@
 """Dict-backed fakes, not `unittest.mock.AsyncMock`. A fake catches "saved
 the wrong object" and read-your-writes bugs that a mock happily accepts
 because it never actually stores anything — see the project plan's testing
-section. These are plain classes with the right methods: no inheritance
-from the Protocol ports, consistent with "Ports: Protocol or ABC?".
+section. Each one explicitly subclasses its port, same as every real
+implementation — see `app/contexts/catalog/application/ports/
+book_repository.py`'s docstring for why that's no longer purely structural
+in this template.
 """
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Self
+from typing import Self
 from uuid import UUID
 
 from app.contexts.catalog.application.ports.book_query_service import BookQueryService
@@ -20,7 +22,7 @@ from app.contexts.ordering.domain.order import Order, OrderId
 from app.contexts.ordering.domain.value_objects import OrderedBookSnapshot
 
 
-class InMemoryBookRepository:
+class InMemoryBookRepository(BookRepository):
     def __init__(self) -> None:
         self.books: dict[UUID, Book] = {}
 
@@ -37,7 +39,7 @@ class InMemoryBookRepository:
         self.books[book.id.value] = book
 
 
-class InMemoryBookQueryService:
+class InMemoryBookQueryService(BookQueryService):
     """Reads from the same dict an `InMemoryBookRepository` writes to,
     mirroring how the real `get_session`-scoped repository and query
     service share one session in production."""
@@ -71,7 +73,7 @@ class InMemoryBookQueryService:
         ]
 
 
-class FakeCatalogTransaction:
+class FakeCatalogTransaction(CatalogTransaction):
     """A dict-snapshot analogue of a real transaction: on a clean
     `__aexit__` the batch's writes stay (they're already in the shared
     dict); on an exception, the dict is restored to what it was before
@@ -79,14 +81,23 @@ class FakeCatalogTransaction:
     for earlier items that would have succeeded on their own. This is what
     lets an application-layer test assert the atomicity `CatalogTransaction`
     exists to provide, without a real database.
+
+    `books` is a real `@property`, not a plain instance attribute — same
+    reason as `SqlAlchemyCatalogTransaction`: `CatalogTransaction.books` is
+    an `@abstractmethod` property, and a same-named instance attribute
+    doesn't satisfy it (verified empirically; see that class's docstring).
     """
 
     def __init__(self, repository: InMemoryBookRepository) -> None:
-        self.books = repository
+        self._books = repository
         self._snapshot: dict[UUID, Book] | None = None
 
+    @property
+    def books(self) -> InMemoryBookRepository:
+        return self._books
+
     async def __aenter__(self) -> Self:
-        self._snapshot = dict(self.books.books)
+        self._snapshot = dict(self._books.books)
         return self
 
     async def __aexit__(
@@ -94,11 +105,11 @@ class FakeCatalogTransaction:
     ) -> None:
         assert self._snapshot is not None
         if exc_type is not None:
-            self.books.books = self._snapshot
+            self._books.books = self._snapshot
         self._snapshot = None
 
 
-class InMemoryOrderRepository:
+class InMemoryOrderRepository(OrderRepository):
     def __init__(self) -> None:
         self.orders: dict[UUID, Order] = {}
 
@@ -109,7 +120,7 @@ class InMemoryOrderRepository:
         self.orders[order.id.value] = order
 
 
-class FakeBookCatalog:
+class FakeBookCatalog(BookCatalog):
     """A test double for `ordering`'s `BookCatalog` port — not for
     `catalog`'s own `CatalogLookup`. It has no idea `catalog` exists, which
     is exactly the point of the Anti-Corruption Layer this stands in for
@@ -126,11 +137,3 @@ class FakeBookCatalog:
 
     async def find(self, book_id: UUID) -> OrderedBookSnapshot | None:
         return self.books.get(book_id)
-
-
-if TYPE_CHECKING:
-    _conforms_to_book_repository: type[BookRepository] = InMemoryBookRepository
-    _conforms_to_book_query_service: type[BookQueryService] = InMemoryBookQueryService
-    _conforms_to_catalog_transaction: type[CatalogTransaction] = FakeCatalogTransaction
-    _conforms_to_order_repository: type[OrderRepository] = InMemoryOrderRepository
-    _conforms_to_book_catalog: type[BookCatalog] = FakeBookCatalog

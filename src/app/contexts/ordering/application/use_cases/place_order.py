@@ -10,8 +10,6 @@ live reference to a `catalog` book) is deliberate, not incidental: see
 `domain/value_objects.py::OrderedBookSnapshot`.
 """
 
-from typing import TYPE_CHECKING
-
 from abxbus import EventBus
 
 from app.contexts.ordering.application.commands import PlaceOrderCommand
@@ -26,7 +24,7 @@ from app.shared.infrastructure.events import publish
 
 
 @command_handler(PlaceOrderCommand)
-class PlaceOrderUseCase:
+class PlaceOrderUseCase(CommandHandler[PlaceOrderCommand, OrderId]):
     def __init__(self, orders: OrderRepository, catalog: BookCatalog, event_bus: EventBus) -> None:
         self._orders = orders
         self._catalog = catalog
@@ -47,9 +45,3 @@ class PlaceOrderUseCase:
             await publish(self._event_bus, event)
 
         return order.id
-
-
-if TYPE_CHECKING:
-    _conforms_to_command_handler: type[CommandHandler[PlaceOrderCommand, OrderId]] = (
-        PlaceOrderUseCase
-    )

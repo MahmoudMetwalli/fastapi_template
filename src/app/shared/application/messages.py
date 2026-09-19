@@ -14,8 +14,23 @@ same reason `application/commands.py` and `application/queries.py` are
 separate files in every context: a command mutates state, a query never
 does, and keeping the types apart makes that distinction checkable rather
 than just a naming convention.
+
+`CommandHandler`/`QueryHandler`'s `execute` is `@abstractmethod`, and every
+use case explicitly inherits its specific `CommandHandler[X, R]`/
+`QueryHandler[X, R]` (e.g. `class RegisterBookUseCase(CommandHandler
+[RegisterBookCommand, BookId]):`) rather than only matching it
+structurally. That combination is what makes conformance genuinely
+enforced instead of merely intended: a wrong `execute` signature is a
+`mypy` error at the class definition itself, and a forgotten `execute`
+override raises `TypeError` the moment anything constructs the class
+(verified empirically — see `docs/ddd-concepts.md`'s "Command/Query Bus"
+section) rather than silently satisfying nothing. This is why no port or
+handler protocol in this template is used purely structurally any more —
+see `application/ports/book_repository.py` for the same pattern applied
+to repositories.
 """
 
+from abc import abstractmethod
 from typing import Any, Protocol
 
 
@@ -37,14 +52,15 @@ class Query[R]:
 class CommandHandler[C: Command[Any], R](Protocol):
     """What a use case must look like to handle a `Command[R]` — note this
     is exactly the `execute(command) -> result` shape every use case in
-    this template already has; no use case class needs to change to
-    satisfy this, only declare it (see each use case module's
-    `if TYPE_CHECKING:` conformance check, matching the convention in
-    `application/ports/*.py`).
+    this template already has. Each use case explicitly declares which one
+    it implements, e.g. `class RegisterBookUseCase(CommandHandler
+    [RegisterBookCommand, BookId]):` — see this module's docstring for why.
     """
 
+    @abstractmethod
     async def execute(self, command: C) -> R: ...
 
 
 class QueryHandler[Q: Query[Any], R](Protocol):
+    @abstractmethod
     async def execute(self, query: Q) -> R: ...

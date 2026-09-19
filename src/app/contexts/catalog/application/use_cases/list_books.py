@@ -1,5 +1,4 @@
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
 from app.contexts.catalog.application.ports.book_query_service import BookQueryService
 from app.contexts.catalog.application.queries import ListBooksQuery
@@ -9,7 +8,7 @@ from app.shared.application.messages import QueryHandler
 
 
 @query_handler(ListBooksQuery)
-class ListBooksUseCase:
+class ListBooksUseCase(QueryHandler[ListBooksQuery, Sequence[BookSummaryReadModel]]):
     def __init__(self, book_queries: BookQueryService) -> None:
         self._book_queries = book_queries
 
@@ -19,9 +18,3 @@ class ListBooksUseCase:
             offset=query.offset,
             title_contains=query.title_contains,
         )
-
-
-if TYPE_CHECKING:
-    _conforms_to_query_handler: type[
-        QueryHandler[ListBooksQuery, Sequence[BookSummaryReadModel]]
-    ] = ListBooksUseCase

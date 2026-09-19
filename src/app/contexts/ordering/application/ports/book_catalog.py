@@ -14,8 +14,13 @@ knowledge of `catalog` either, for the same reason.
 `None` means "no such book" — deciding whether that's an error is the
 calling use case's job, not this port's; see `domain/errors.py
 ::BookNotFoundInCatalogError`.
+
+`@abstractmethod` + explicit inheritance by `CatalogAntiCorruptionLayer`
+(and its test fake) — see `catalog`'s `application/ports/book_repository
+.py` docstring for why.
 """
 
+from abc import abstractmethod
 from typing import Protocol
 from uuid import UUID
 
@@ -23,4 +28,5 @@ from app.contexts.ordering.domain.value_objects import OrderedBookSnapshot
 
 
 class BookCatalog(Protocol):
+    @abstractmethod
     async def find(self, book_id: UUID) -> OrderedBookSnapshot | None: ...

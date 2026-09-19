@@ -100,18 +100,22 @@ class __Aggregate__Created(DomainEvent):
     __aggregate___id: EntityId
 '''
 
-REPOSITORY_PORT = '''"""A `Protocol`, not explicitly subclassed by its implementation — see
+REPOSITORY_PORT = '''"""A `Protocol` with `@abstractmethod` members, explicitly subclassed by
+its implementation — see
 `app/contexts/catalog/application/ports/book_repository.py` for why.
 """
 
+from abc import abstractmethod
 from typing import Protocol
 
 from app.contexts.__context__.domain.__aggregate__ import __Aggregate__, __Aggregate__Id
 
 
 class __Aggregate__Repository(Protocol):
+    @abstractmethod
     async def get(self, __aggregate___id: __Aggregate__Id) -> __Aggregate__ | None: ...
 
+    @abstractmethod
     async def add(self, __aggregate__: __Aggregate__) -> None: ...
 '''
 
@@ -150,9 +154,7 @@ class __Aggregate__ReadModel(BaseModel):
     name: str
 '''
 
-CREATE_USE_CASE = '''from typing import TYPE_CHECKING
-
-from abxbus import EventBus
+CREATE_USE_CASE = '''from abxbus import EventBus
 
 from app.contexts.__context__.application.commands import Create__Aggregate__Command
 from app.contexts.__context__.application.ports.__aggregate___repository import (
@@ -165,7 +167,7 @@ from app.shared.infrastructure.events import publish
 
 
 @command_handler(Create__Aggregate__Command)
-class Create__Aggregate__UseCase:
+class Create__Aggregate__UseCase(CommandHandler[Create__Aggregate__Command, __Aggregate__Id]):
     def __init__(self, __aggregate__s: __Aggregate__Repository, event_bus: EventBus) -> None:
         self._\
 __aggregate__s = __aggregate__s
@@ -180,17 +182,9 @@ __aggregate__s.add(__aggregate__)
             await publish(self._event_bus, event)
 
         return __aggregate__.id
-
-
-if TYPE_CHECKING:
-    _conforms_to_command_handler: type[
-        CommandHandler[Create__Aggregate__Command, __Aggregate__Id]
-    ] = Create__Aggregate__UseCase
 '''
 
-GET_USE_CASE = '''from typing import TYPE_CHECKING
-
-from app.contexts.__context__.application.ports.__aggregate___repository import (
+GET_USE_CASE = '''from app.contexts.__context__.application.ports.__aggregate___repository import (
     __Aggregate__Repository,
 )
 from app.contexts.__context__.application.queries import Get__Aggregate__Query
@@ -202,7 +196,7 @@ from app.shared.application.messages import QueryHandler
 
 
 @query_handler(Get__Aggregate__Query)
-class Get__Aggregate__UseCase:
+class Get__Aggregate__UseCase(QueryHandler[Get__Aggregate__Query, __Aggregate__ReadModel]):
     def __init__(self, __aggregate__s: __Aggregate__Repository) -> None:
         self._\
 __aggregate__s = __aggregate__s
@@ -213,12 +207,6 @@ __aggregate__s.get(__Aggregate__Id(query.__aggregate___id))
         if __aggregate__ is None:
             raise __Aggregate__NotFoundError(query.__aggregate___id)
         return __Aggregate__ReadModel(id=__aggregate__.id.value, name=__aggregate__.name)
-
-
-if TYPE_CHECKING:
-    _conforms_to_query_handler: type[
-        QueryHandler[Get__Aggregate__Query, __Aggregate__ReadModel]
-    ] = Get__Aggregate__UseCase
 '''
 
 MODELS = '''import uuid
@@ -250,9 +238,7 @@ def to_row(__aggregate__: __Aggregate__) -> __Aggregate__Row:
     return __Aggregate__Row(id=__aggregate__.id.value, name=__aggregate__.name)
 '''
 
-REPOSITORY_IMPL = '''from typing import TYPE_CHECKING
-
-from app.contexts.__context__.application.ports.__aggregate___repository import (
+REPOSITORY_IMPL = '''from app.contexts.__context__.application.ports.__aggregate___repository import (
     __Aggregate__Repository,
 )
 from app.contexts.__context__.domain.__aggregate__ import __Aggregate__, __Aggregate__Id
@@ -261,7 +247,7 @@ from app.contexts.__context__.infrastructure.persistence.models import __Aggrega
 from app.shared.infrastructure.database.session_scoped import SqlAlchemySessionScoped
 
 
-class SqlAlchemy__Aggregate__Repository(SqlAlchemySessionScoped):
+class SqlAlchemy__Aggregate__Repository(SqlAlchemySessionScoped, __Aggregate__Repository):
     async def get(self, __aggregate___id: __Aggregate__Id) -> __Aggregate__ | None:
         async with self._strategy.session() as session:
             row = await session.get(__Aggregate__Row, __aggregate___id.value)
@@ -270,11 +256,6 @@ class SqlAlchemy__Aggregate__Repository(SqlAlchemySessionScoped):
     async def add(self, __aggregate__: __Aggregate__) -> None:
         async with self._strategy.session() as session:
             session.add(to_row(__aggregate__))
-
-
-if TYPE_CHECKING:
-    _conforms_to_\
-__aggregate___repository: type[__Aggregate__Repository] = SqlAlchemy__Aggregate__Repository
 '''
 
 SCHEMAS = '''from typing import Annotated

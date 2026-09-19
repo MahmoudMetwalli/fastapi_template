@@ -5,11 +5,11 @@ trigger a lazy load or construct a `Book` aggregate just to render it.
 Inherits `SqlAlchemySessionScoped` for its `SessionStrategy`, like
 `SqlAlchemyBookRepository` — no query in this template currently needs to
 share a transaction with anything else, but the `BoundSession` strategy is
-available for free if one ever does.
+available for free if one ever does. Explicitly subclasses `BookQueryService`
+too, same reasoning as `book_repository.py`.
 """
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import select
@@ -20,7 +20,7 @@ from app.contexts.catalog.infrastructure.persistence.models import BookRow
 from app.shared.infrastructure.database.session_scoped import SqlAlchemySessionScoped
 
 
-class SqlAlchemyBookQueryService(SqlAlchemySessionScoped):
+class SqlAlchemyBookQueryService(SqlAlchemySessionScoped, BookQueryService):
     async def by_id(self, book_id: UUID) -> BookReadModel | None:
         statement = select(BookRow.id, BookRow.title, BookRow.isbn, BookRow.price_cents).where(
             BookRow.id == book_id
@@ -41,7 +41,3 @@ class SqlAlchemyBookQueryService(SqlAlchemySessionScoped):
         async with self._strategy.session() as session:
             result = await session.execute(statement)
             return [BookSummaryReadModel.model_validate(row) for row in result.mappings()]
-
-
-if TYPE_CHECKING:
-    _conforms_to_book_query_service: type[BookQueryService] = SqlAlchemyBookQueryService

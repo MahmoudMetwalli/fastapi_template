@@ -1,5 +1,3 @@
-from typing import TYPE_CHECKING
-
 from abxbus import EventBus
 
 from app.contexts.catalog.application.commands import ChangeBookPriceCommand
@@ -13,7 +11,7 @@ from app.shared.infrastructure.events import publish
 
 
 @command_handler(ChangeBookPriceCommand)
-class ChangeBookPriceUseCase:
+class ChangeBookPriceUseCase(CommandHandler[ChangeBookPriceCommand, None]):
     def __init__(self, books: BookRepository, event_bus: EventBus) -> None:
         self._books = books
         self._event_bus = event_bus
@@ -31,9 +29,3 @@ class ChangeBookPriceUseCase:
         # request's actual commit, not strictly after it.
         for event in book.pull_events():
             await publish(self._event_bus, event)
-
-
-if TYPE_CHECKING:
-    _conforms_to_command_handler: type[CommandHandler[ChangeBookPriceCommand, None]] = (
-        ChangeBookPriceUseCase
-    )

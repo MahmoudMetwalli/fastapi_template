@@ -404,10 +404,22 @@ on the handler.
   express "constrain the decorated class against the type argument from
   an earlier call" precisely enough for current mypy (a `Protocol` with a
   generic `__call__` looked like the right tool; mypy rejects matching a
-  plain function against it). Each handler's own `if TYPE_CHECKING:
-  _conforms_to_command_handler: type[CommandHandler[X, R]] = TheUseCase`
-  line is what closes that gap statically — the same pattern this
-  template already uses for every port (`application/ports/*.py`).
+  plain function against it). What closes that gap is each use case
+  explicitly inheriting its specific `CommandHandler[X, R]`/`QueryHandler
+  [X, R]` — e.g. `class RegisterBookUseCase(CommandHandler
+  [RegisterBookCommand, BookId]):` — the same enforced-conformance pattern
+  every port in this template uses (`application/ports/*.py`): a wrong
+  `execute` signature is a `mypy` error at the class's own definition, and
+  a forgotten override raises `TypeError` at construction, both verified
+  empirically. `CommandHandler`/`QueryHandler`'s `execute` is
+  `@abstractmethod` specifically to make the second guarantee real. The
+  one gotcha this approach has, if a port ever declares an abstract
+  `@property` the way `CatalogTransaction.books` does: the implementation
+  needs a *real* property, not a same-named plain instance attribute —
+  `ABCMeta` computes abstractness from the class before any instance
+  exists, so an attribute merely assigned in `__init__`/`__aenter__`
+  doesn't satisfy it (verified empirically; see
+  `SqlAlchemyCatalogTransaction`'s docstring for the fix).
 - Forgetting the decorator entirely, or registering two handlers for the
   same command, both raise a clear `ValueError` — naming the class or the
   command type — the moment `CommandBus`/`QueryBus` is constructed, not a
