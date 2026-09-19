@@ -4,10 +4,13 @@ case propagate straight to the handlers registered in
 wraps every use case call in `except Exception: raise HTTPException(500)`,
 turning every domain error into an opaque 500.
 
-`@inject` + `Provide[Container.x_use_case]` on every route: every
-repository/query-service/use-case in `catalog` is container-managed now
-(see `containers.py`) — none of them carry per-request state, so there's
-no request-scoped dependency chain to plumb through plain `Depends()`.
+Routes depend on `CommandBus`/`QueryBus` (`shared/application/bus.py`),
+not a specific use case — this router doesn't import any of
+`RegisterBookUseCase`, `GetBookUseCase`, etc. at all. `bus.dispatch(...)`
+still returns the real result type (`BookId`, `BookReadModel`, ...) under
+mypy, not `Any` — see `application/commands.py`/`queries.py`, where each
+command/query declares that type as `Command[R]`/`Query[R]`.
+
 `@inject` must be the innermost decorator (directly above `def`, below
 `@router...`) — that's the most common way this integration breaks. See
 the project README for why no module here uses
@@ -30,13 +33,6 @@ from app.contexts.catalog.application.commands import (
     RegisterBooksBatchCommand,
 )
 from app.contexts.catalog.application.queries import GetBookQuery, ListBooksQuery
-from app.contexts.catalog.application.use_cases.change_book_price import ChangeBookPriceUseCase
-from app.contexts.catalog.application.use_cases.get_book import GetBookUseCase
-from app.contexts.catalog.application.use_cases.list_books import ListBooksUseCase
-from app.contexts.catalog.application.use_cases.register_book import RegisterBookUseCase
-from app.contexts.catalog.application.use_cases.register_books_batch import (
-    RegisterBooksBatchUseCase,
-)
 from app.contexts.catalog.presentation.schemas import (
     BookCreatedResponse,
     BookListResponse,
@@ -47,26 +43,18 @@ from app.contexts.catalog.presentation.schemas import (
     RegisterBookRequest,
     RegisterBooksBatchRequest,
 )
+from app.shared.application.bus import CommandBus, QueryBus
 
 router = APIRouter(prefix="/books", tags=["catalog"])
 
-RegisterBookUC = Annotated[RegisterBookUseCase, Depends(Provide[Container.register_book_use_case])]
-ChangeBookPriceUC = Annotated[
-    ChangeBookPriceUseCase, Depends(Provide[Container.change_book_price_use_case])
-]
-GetBookUC = Annotated[GetBookUseCase, Depends(Provide[Container.get_book_use_case])]
-ListBooksUC = Annotated[ListBooksUseCase, Depends(Provide[Container.list_books_use_case])]
-RegisterBooksBatchUC = Annotated[
-    RegisterBooksBatchUseCase, Depends(Provide[Container.register_books_batch_use_case])
-]
+Commands = Annotated[CommandBus, Depends(Provide[Container.command_bus])]
+Queries = Annotated[QueryBus, Depends(Provide[Container.query_bus])]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 @inject
-async def register_book(
-    payload: RegisterBookRequest, use_case: RegisterBookUC
-) -> BookCreatedResponse:
-    book_id = await use_case.execute(
+async def register_book(payload: RegisterBookRequest, bus: Commands) -> BookCreatedResponse:
+    book_id = await bus.dispatch(
         RegisterBookCommand(
             title=payload.title,
             isbn=payload.isbn,
@@ -79,9 +67,9 @@ async def register_book(
 @router.post("/batch", status_code=status.HTTP_201_CREATED)
 @inject
 async def register_books_batch(
-    payload: RegisterBooksBatchRequest, use_case: RegisterBooksBatchUC
+    payload: RegisterBooksBatchRequest, bus: Commands
 ) -> BooksBatchCreatedResponse:
-    book_ids = await use_case.execute(
+    book_ids = await bus.dispatch(
         RegisterBooksBatchCommand(
             items=[
                 RegisterBookBatchItem(
@@ -96,20 +84,20 @@ async def register_books_batch(
 
 @router.get("/{book_id}")
 @inject
-async def get_book(book_id: UUID, use_case: GetBookUC) -> BookResponse:
-    read_model = await use_case.execute(GetBookQuery(book_id=book_id))
+async def get_book(book_id: UUID, bus: Queries) -> BookResponse:
+    read_model = await bus.dispatch(GetBookQuery(book_id=book_id))
     return BookResponse.model_validate(read_model)
 
 
 @router.get("")
 @inject
 async def list_books(
-    use_case: ListBooksUC,
+    bus: Queries,
     limit: Annotated[int, Query(gt=0, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
     title_contains: str | None = None,
 ) -> BookListResponse:
-    read_models = await use_case.execute(
+    read_models = await bus.dispatch(
         ListBooksQuery(limit=limit, offset=offset, title_contains=title_contains)
     )
     return BookListResponse(
@@ -119,9 +107,7 @@ async def list_books(
 
 @router.patch("/{book_id}/price", status_code=status.HTTP_204_NO_CONTENT)
 @inject
-async def change_book_price(
-    book_id: UUID, payload: ChangeBookPriceRequest, use_case: ChangeBookPriceUC
-) -> None:
-    await use_case.execute(
+async def change_book_price(book_id: UUID, payload: ChangeBookPriceRequest, bus: Commands) -> None:
+    await bus.dispatch(
         ChangeBookPriceCommand(book_id=book_id, new_price_cents=payload.new_price_cents)
     )

@@ -95,13 +95,17 @@ layers = ["presentation", "infrastructure", "application", "domain"]
 containers = ["app.contexts.ordering"]
 
 [[tool.importlinter.contracts]]
-# `app.shared` has no `application` layer — nothing needs one (there is no
-# generic Unit of Work/use-case base left to put there; see the project's
-# unit_of_work.py history). A separate, smaller contract rather than
-# stretching one `layers` list across containers with different shapes.
+# A separate, smaller contract rather than folding `app.shared` into the
+# per-context ones above, since nothing requires the two to have the same
+# shape going forward. `app.shared.application` (Command[R]/Query[R], the
+# CommandBus/QueryBus) is a genuine application layer now — see
+# `shared/application/bus.py` — added once something actually needed it,
+# not speculatively; see the project's `unit_of_work.py` history for the
+# same lesson learned the other way (a generic per-request Unit of Work
+# added speculatively, then removed).
 name = "Shared kernel layers point inward"
 type = "layers"
-layers = ["presentation", "infrastructure", "domain"]
+layers = ["presentation", "infrastructure", "application", "domain"]
 containers = ["app.shared"]
 
 [[tool.importlinter.contracts]]

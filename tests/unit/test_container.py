@@ -57,6 +57,8 @@ class TestContainer:
             assert await _resolve(container.catalog_acl()) is not None
             assert await _resolve(container.place_order_use_case()) is not None
             assert await _resolve(container.get_order_use_case()) is not None
+            assert await _resolve(container.command_bus()) is not None
+            assert await _resolve(container.query_bus()) is not None
         finally:
             shutdown_result = container.shutdown_resources()
             if shutdown_result is not None:

@@ -117,18 +117,24 @@ class __Aggregate__Repository(Protocol):
 
 COMMANDS = '''from dataclasses import dataclass
 
+from app.contexts.__context__.domain.__aggregate__ import __Aggregate__Id
+from app.shared.application.messages import Command
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Create__Aggregate__Command:
+class Create__Aggregate__Command(Command[__Aggregate__Id]):
     name: str
 '''
 
 QUERIES = '''from dataclasses import dataclass
 from uuid import UUID
 
+from app.contexts.__context__.application.read_models import __Aggregate__ReadModel
+from app.shared.application.messages import Query
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Get__Aggregate__Query:
+class Get__Aggregate__Query(Query[__Aggregate__ReadModel]):
     __aggregate___id: UUID
 '''
 
@@ -144,16 +150,21 @@ class __Aggregate__ReadModel(BaseModel):
     name: str
 '''
 
-CREATE_USE_CASE = '''from abxbus import EventBus
+CREATE_USE_CASE = '''from typing import TYPE_CHECKING
+
+from abxbus import EventBus
 
 from app.contexts.__context__.application.commands import Create__Aggregate__Command
 from app.contexts.__context__.application.ports.__aggregate___repository import (
     __Aggregate__Repository,
 )
 from app.contexts.__context__.domain.__aggregate__ import __Aggregate__, __Aggregate__Id
+from app.shared.application.bus import command_handler
+from app.shared.application.messages import CommandHandler
 from app.shared.infrastructure.events import publish
 
 
+@command_handler(Create__Aggregate__Command)
 class Create__Aggregate__UseCase:
     def __init__(self, __aggregate__s: __Aggregate__Repository, event_bus: EventBus) -> None:
         self._\
@@ -169,17 +180,28 @@ __aggregate__s.add(__aggregate__)
             await publish(self._event_bus, event)
 
         return __aggregate__.id
+
+
+if TYPE_CHECKING:
+    _conforms_to_command_handler: type[
+        CommandHandler[Create__Aggregate__Command, __Aggregate__Id]
+    ] = Create__Aggregate__UseCase
 '''
 
-GET_USE_CASE = '''from app.contexts.__context__.application.ports.__aggregate___repository import (
+GET_USE_CASE = '''from typing import TYPE_CHECKING
+
+from app.contexts.__context__.application.ports.__aggregate___repository import (
     __Aggregate__Repository,
 )
 from app.contexts.__context__.application.queries import Get__Aggregate__Query
 from app.contexts.__context__.application.read_models import __Aggregate__ReadModel
 from app.contexts.__context__.domain.errors import __Aggregate__NotFoundError
 from app.contexts.__context__.domain.__aggregate__ import __Aggregate__Id
+from app.shared.application.bus import query_handler
+from app.shared.application.messages import QueryHandler
 
 
+@query_handler(Get__Aggregate__Query)
 class Get__Aggregate__UseCase:
     def __init__(self, __aggregate__s: __Aggregate__Repository) -> None:
         self._\
@@ -191,6 +213,12 @@ __aggregate__s.get(__Aggregate__Id(query.__aggregate___id))
         if __aggregate__ is None:
             raise __Aggregate__NotFoundError(query.__aggregate___id)
         return __Aggregate__ReadModel(id=__aggregate__.id.value, name=__aggregate__.name)
+
+
+if TYPE_CHECKING:
+    _conforms_to_query_handler: type[
+        QueryHandler[Get__Aggregate__Query, __Aggregate__ReadModel]
+    ] = Get__Aggregate__UseCase
 '''
 
 MODELS = '''import uuid
@@ -279,41 +307,32 @@ from fastapi import APIRouter, Depends, status
 from app.containers import Container
 from app.contexts.__context__.application.commands import Create__Aggregate__Command
 from app.contexts.__context__.application.queries import Get__Aggregate__Query
-from app.contexts.__context__.application.use_cases.create_\
-__aggregate__ import Create__Aggregate__UseCase
-from app.contexts.__context__.application.use_cases.get_\
-__aggregate__ import Get__Aggregate__UseCase
 from app.contexts.__context__.presentation.schemas import (
     Create__Aggregate__Request,
     __Aggregate__CreatedResponse,
     __Aggregate__Response,
 )
+from app.shared.application.bus import CommandBus, QueryBus
 
 router = APIRouter(prefix="/__table__", tags=["__context__"])
 
-Create__Aggregate__UC = Annotated[
-    Create__Aggregate__UseCase, Depends(Provide[Container.create___aggregate___use_case])
-]
-Get__Aggregate__UC = Annotated[
-    Get__Aggregate__UseCase, Depends(Provide[Container.get___aggregate___use_case])
-]
+Commands = Annotated[CommandBus, Depends(Provide[Container.command_bus])]
+Queries = Annotated[QueryBus, Depends(Provide[Container.query_bus])]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 @inject
 async def create___aggregate__(
-    payload: Create__Aggregate__Request, use_case: Create__Aggregate__UC
+    payload: Create__Aggregate__Request, bus: Commands
 ) -> __Aggregate__CreatedResponse:
-    __aggregate___id = await use_case.execute(Create__Aggregate__Command(name=payload.name))
+    __aggregate___id = await bus.dispatch(Create__Aggregate__Command(name=payload.name))
     return __Aggregate__CreatedResponse(id=__aggregate___id.value)
 
 
 @router.get("/{__aggregate___id}")
 @inject
-async def get___aggregate__(
-    __aggregate___id: UUID, use_case: Get__Aggregate__UC
-) -> __Aggregate__Response:
-    read_model = await use_case.execute(Get__Aggregate__Query(__aggregate___id=__aggregate___id))
+async def get___aggregate__(__aggregate___id: UUID, bus: Queries) -> __Aggregate__Response:
+    read_model = await bus.dispatch(Get__Aggregate__Query(__aggregate___id=__aggregate___id))
     return __Aggregate__Response.model_validate(read_model)
 '''
 
@@ -415,7 +434,7 @@ def insert_into_containers(*, context: str, aggregate: str) -> None:
     if import_lines in text:
         return
 
-    anchor = "from app.shared.infrastructure.database.engine import EngineResource\n"
+    anchor = "from app.shared.application.bus import CommandBus, QueryBus\n"
     if anchor not in text:
         print(f"warning: could not find import anchor in {path}; add these imports manually:\n"
               f"{import_lines}")
@@ -423,7 +442,7 @@ def insert_into_containers(*, context: str, aggregate: str) -> None:
         text = text.replace(anchor, import_lines + anchor)
 
     provider_block = (
-        f"\n    {aggregate_snake}_repository = providers.Factory(\n"
+        f"    {aggregate_snake}_repository = providers.Factory(\n"
         f"        SqlAlchemy{aggregate}Repository, strategy=own_session_factory_strategy\n"
         f"    )\n"
         f"    create_{aggregate_snake}_use_case = providers.Factory(\n"
@@ -432,9 +451,45 @@ def insert_into_containers(*, context: str, aggregate: str) -> None:
         f"    )\n"
         f"    get_{aggregate_snake}_use_case = providers.Factory(\n"
         f"        Get{aggregate}UseCase, {aggregate_snake}s={aggregate_snake}_repository\n"
-        f"    )\n"
+        f"    )\n\n"
     )
-    text = text.rstrip("\n") + "\n" + provider_block
+    # Inserted right before `command_bus`, not at EOF: every use case the
+    # buses list must already be defined above them.
+    command_bus_anchor = "    command_bus = providers.Factory("
+    if command_bus_anchor not in text:
+        print(
+            f"warning: could not find {command_bus_anchor!r} in {path}; "
+            f"add these providers manually:\n{provider_block}"
+        )
+    else:
+        text = text.replace(command_bus_anchor, provider_block + command_bus_anchor, 1)
+
+    # Register the new handlers into command_bus's/query_bus's providers.List(...) —
+    # each bus's list closes with "        ),\n    )" immediately followed by
+    # either the next bus or end of file.
+    command_bus_close = "        ),\n    )\n    query_bus = providers.Factory("
+    if command_bus_close in text:
+        text = text.replace(
+            command_bus_close,
+            f"            create_{aggregate_snake}_use_case,\n{command_bus_close}",
+            1,
+        )
+    else:
+        print(
+            "warning: could not register the new command handler into command_bus's "
+            f"providers.List(...); add `create_{aggregate_snake}_use_case,` to it manually."
+        )
+
+    last_close = text.rfind("        ),\n    )")
+    if last_close == -1:
+        print(
+            "warning: could not register the new query handler into query_bus's "
+            f"providers.List(...); add `get_{aggregate_snake}_use_case,` to it manually."
+        )
+    else:
+        insertion = f"            get_{aggregate_snake}_use_case,\n"
+        text = text[:last_close] + insertion + text[last_close:]
+
     path.write_text(text)
 
 
@@ -452,10 +507,6 @@ def insert_into_pyproject(*, context: str) -> None:
             f'add "app.contexts.{context}.domain" to its source_modules list by hand.'
         )
 
-    contract_anchor = (
-        '[[tool.importlinter.contracts]]\n'
-        '# `app.shared` has no `application` layer'
-    )
     new_contract = (
         f"[[tool.importlinter.contracts]]\n"
         f'name = "{context.capitalize()} layers point inward"\n'
@@ -463,15 +514,23 @@ def insert_into_pyproject(*, context: str) -> None:
         f'layers = ["presentation", "infrastructure", "application", "domain"]\n'
         f'containers = ["app.contexts.{context}"]\n\n'
     )
+    # Anchor on the "Shared kernel layers point inward" contract's *name*
+    # line, not its preceding comment (which changes wording over time) —
+    # then walk back to the "[[tool.importlinter.contracts]]" marker that
+    # opens that same block, and insert the new contract right before it.
+    shared_name_line = 'name = "Shared kernel layers point inward"'
     if f'name = "{context.capitalize()} layers point inward"' in text:
         pass
-    elif contract_anchor in text:
-        text = text.replace(contract_anchor, new_contract + contract_anchor, 1)
     else:
-        print(
-            "warning: could not insert a layers contract automatically; add one for "
-            f"'{context}' to pyproject.toml by hand, matching catalog's or ordering's."
-        )
+        name_idx = text.find(shared_name_line)
+        block_start = text.rfind("[[tool.importlinter.contracts]]", 0, name_idx) if name_idx != -1 else -1
+        if name_idx == -1 or block_start == -1:
+            print(
+                "warning: could not insert a layers contract automatically; add one for "
+                f"'{context}' to pyproject.toml by hand, matching catalog's or ordering's."
+            )
+        else:
+            text = text[:block_start] + new_contract + text[block_start:]
 
     path.write_text(text)
 

@@ -3,7 +3,9 @@
 (`WiringConfiguration(packages=[...])`) runs on instantiation and imports
 every module under `app.contexts`, including `presentation/router.py`,
 which imports `Container` from *this* module; instantiating here would
-therefore be a genuine import cycle.
+therefore be a genuine import cycle. That same wiring pass is also what
+runs every `@command_handler(...)`/`@query_handler(...)` decorator (see
+`shared/application/bus.py`), since it imports every use case module.
 
 `book_repository`/`book_query_service` are `Factory`s, not per-request-
 scoped anything: their `SessionStrategy` (`own_session_factory_strategy`)
@@ -24,6 +26,14 @@ roots meet: `catalog_lookup` (implementing `catalog.published.lookup
 (implementing `ordering.application.ports.book_catalog.BookCatalog`) is
 `ordering`'s side, and gluing the two together — the only place that's
 ever allowed to happen — is this container, not either context's own code.
+
+`command_bus`/`query_bus` take a `providers.List(...)` of use case
+providers, not a hand-maintained `{command_type: use_case}` dict — each
+use case already declares which command/query it handles right on itself
+(`@command_handler(...)`/`@query_handler(...)`, see
+`shared/application/bus.py`), so adding a new one to either bus means
+adding its provider to the matching `List(...)` here and nothing else;
+there is no second place that re-states the pairing.
 """
 
 from dependency_injector import containers, providers
@@ -48,6 +58,7 @@ from app.contexts.ordering.infrastructure.catalog_acl import CatalogAntiCorrupti
 from app.contexts.ordering.infrastructure.persistence.order_repository import (
     SqlAlchemyOrderRepository,
 )
+from app.shared.application.bus import CommandBus, QueryBus
 from app.shared.infrastructure.database.engine import EngineResource
 from app.shared.infrastructure.database.session_strategy import OwnSessionFactory
 from app.shared.infrastructure.events import EventBusResource
@@ -124,3 +135,21 @@ class Container(containers.DeclarativeContainer):
         event_bus=event_bus,
     )
     get_order_use_case = providers.Factory(GetOrderUseCase, orders=order_repository)
+
+    command_bus = providers.Factory(
+        CommandBus,
+        handlers=providers.List(
+            register_book_use_case,
+            change_book_price_use_case,
+            register_books_batch_use_case,
+            place_order_use_case,
+        ),
+    )
+    query_bus = providers.Factory(
+        QueryBus,
+        handlers=providers.List(
+            get_book_use_case,
+            list_books_use_case,
+            get_order_use_case,
+        ),
+    )

@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from abxbus import EventBus
 
 from app.contexts.catalog.application.commands import ChangeBookPriceCommand
@@ -5,9 +7,12 @@ from app.contexts.catalog.application.ports.book_repository import BookRepositor
 from app.contexts.catalog.domain.book import BookId
 from app.contexts.catalog.domain.errors import BookNotFoundError
 from app.contexts.catalog.domain.value_objects import Money
+from app.shared.application.bus import command_handler
+from app.shared.application.messages import CommandHandler
 from app.shared.infrastructure.events import publish
 
 
+@command_handler(ChangeBookPriceCommand)
 class ChangeBookPriceUseCase:
     def __init__(self, books: BookRepository, event_bus: EventBus) -> None:
         self._books = books
@@ -26,3 +31,9 @@ class ChangeBookPriceUseCase:
         # request's actual commit, not strictly after it.
         for event in book.pull_events():
             await publish(self._event_bus, event)
+
+
+if TYPE_CHECKING:
+    _conforms_to_command_handler: type[CommandHandler[ChangeBookPriceCommand, None]] = (
+        ChangeBookPriceUseCase
+    )

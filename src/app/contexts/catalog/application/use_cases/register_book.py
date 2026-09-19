@@ -12,6 +12,8 @@ for a dedicated UoW object to coordinate once only one repository is
 involved.
 """
 
+from typing import TYPE_CHECKING
+
 from abxbus import EventBus
 
 from app.contexts.catalog.application.commands import RegisterBookCommand
@@ -19,9 +21,12 @@ from app.contexts.catalog.application.ports.book_repository import BookRepositor
 from app.contexts.catalog.domain.book import Book, BookId
 from app.contexts.catalog.domain.errors import DuplicateIsbnError
 from app.contexts.catalog.domain.value_objects import Isbn, Money, Title
+from app.shared.application.bus import command_handler
+from app.shared.application.messages import CommandHandler
 from app.shared.infrastructure.events import publish
 
 
+@command_handler(RegisterBookCommand)
 class RegisterBookUseCase:
     def __init__(self, books: BookRepository, event_bus: EventBus) -> None:
         self._books = books
@@ -52,3 +57,9 @@ class RegisterBookUseCase:
             await publish(self._event_bus, event)
 
         return book.id
+
+
+if TYPE_CHECKING:
+    _conforms_to_command_handler: type[CommandHandler[RegisterBookCommand, BookId]] = (
+        RegisterBookUseCase
+    )

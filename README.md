@@ -104,10 +104,12 @@ uv run python scripts/new_context.py billing --aggregate Invoice
 ```
 
 Scaffolds the four layers with a minimal, working one-field aggregate
-(`create`/`get`, wired end to end from domain to HTTP), and — the tedious
-part — registers it for you: an import in `registry.py`, an
+(`create`/`get`, wired end to end from domain to HTTP through
+`CommandBus`/`QueryBus` — see "Design decisions worth knowing" below), and
+— the tedious part — registers it for you: an import in `registry.py`, an
 `include_router(...)` in `router.py`, `Factory` providers in
-`containers.py`, and an `"<Your context> layers point inward"`
+`containers.py` plus an entry in `command_bus`/`query_bus`'s
+`providers.List(...)`, and an `"<Your context> layers point inward"`
 import-linter contract in `pyproject.toml`. It then runs `ruff` to sort
 imports and format the new files. The result passes `mypy --strict` and
 `lint-imports` immediately — verified by generating a throwaway context
@@ -268,6 +270,26 @@ not incidental ceremony.
   every repository, query service, transaction, and use case is built
   *from* it, so overriding that one provider is enough for the whole
   graph to point at the test database).
+- **Routes dispatch through `CommandBus`/`QueryBus`
+  (`shared/application/bus.py`), not a use case injected per route.** Each
+  use case declares what it handles on itself (`@command_handler(X)`/
+  `@query_handler(X)`, mirroring NestJS's `@nestjs/cqrs`); `containers.py`
+  only lists instances (`providers.List(...)`) — there's no second place
+  that re-states the command-to-handler pairing. `bus.dispatch(...)` still
+  resolves to the real result type under `mypy --strict`, not `Any`
+  (`Command[R]`/`Query[R]` carry it as a type parameter); the decorator
+  itself can't statically verify the handler's signature though — a known
+  mypy limitation for generic decorator factories, verified empirically —
+  so each handler keeps the same `if TYPE_CHECKING: _conforms...` line
+  every port in this template already uses. Forgetting the decorator, or
+  registering two handlers for one command, raises a clear error at
+  container-build time, not a bare `KeyError` at request time. Both buses
+  are `Factory`, not `Singleton`, deliberately: `RegisterBooksBatchUseCase`
+  holds a `CatalogTransaction` bound to one open session, which must never
+  be shared across concurrent requests — see docs/ddd-concepts.md's
+  "Command/Query Bus" section for the full reasoning, including why a
+  Singleton bus would silently reintroduce that hazard for one specific
+  handler while looking identical to the other six.
 
 ## Growing this template
 

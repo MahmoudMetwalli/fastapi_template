@@ -6,13 +6,18 @@ one the same way `catalog` did (see its `application/ports/
 book_query_service.py`) if `ordering` grows one.
 """
 
+from typing import TYPE_CHECKING
+
 from app.contexts.ordering.application.ports.order_repository import OrderRepository
 from app.contexts.ordering.application.queries import GetOrderQuery
 from app.contexts.ordering.application.read_models import OrderLineReadModel, OrderReadModel
 from app.contexts.ordering.domain.errors import OrderNotFoundError
 from app.contexts.ordering.domain.order import OrderId
+from app.shared.application.bus import query_handler
+from app.shared.application.messages import QueryHandler
 
 
+@query_handler(GetOrderQuery)
 class GetOrderUseCase:
     def __init__(self, orders: OrderRepository) -> None:
         self._orders = orders
@@ -35,3 +40,7 @@ class GetOrderUseCase:
                 for line in order.lines
             ],
         )
+
+
+if TYPE_CHECKING:
+    _conforms_to_query_handler: type[QueryHandler[GetOrderQuery, OrderReadModel]] = GetOrderUseCase

@@ -357,5 +357,82 @@ never constructs the aggregate at all).
 it fetches the `Order` aggregate directly through `OrderRepository` rather
 than through a parallel query-service port, because there's no list view
 yet to justify one — see that use case's docstring. Add a
+`OrderQueryService` the same way `catalog` did if `ordering` grows one.
+
+## Command/Query Bus
+
+Not a DDD pattern by itself — a mediator sitting on top of CQRS — but it's
+what routes are built against in this template, so it's documented here
+alongside the concepts it composes.
+
+A route depends on `CommandBus`/`QueryBus` (`shared/application/bus.py`)
+and calls `bus.dispatch(SomeCommand(...))` — it doesn't import or inject
+any specific use case class. Each use case declares what it handles right
+on itself:
+
+```python
+@command_handler(RegisterBookCommand)
+class RegisterBookUseCase:
+    async def execute(self, command: RegisterBookCommand) -> BookId: ...
+```
+
+— mirroring NestJS's `@nestjs/cqrs` (`@CommandHandler(SomeCommand)` +
+`implements ICommandHandler<SomeCommand>`). `containers.py` only lists
+*instances* (`providers.List(register_book_use_case, ...)`); there is no
+second place that re-states which command each one handles.
+
+**Why not a hand-maintained `{command_type: handler}` dict instead?**
+Earlier iterations of this exact mechanism tried that, and a version before
+it that used a separate generic `build_handler_registry` helper — both
+worked, but needed a second place (a builder function or a dict literal)
+that repeated pairing information already implied by each use case's own
+name and signature. The decorator collapses that: the pairing lives once,
+on the handler.
+
+**What's checked, and what isn't, and by what:**
+
+- `bus.dispatch(RegisterBookCommand(...))` resolves to a real `BookId`
+  under `mypy --strict`, not `Any` — verified with `reveal_type()` before
+  wiring this in. `Command[R]`/`Query[R]` (`shared/application/messages
+  .py`) carry the result type as a type parameter, and `dispatch`'s own
+  generic signature (`dispatch[R](self, command: Command[R]) -> R`) is
+  what puts it back at the call site, even though the bus's internal
+  `dict[type, handler]` lookup is necessarily type-erased.
+- `@command_handler(X)`/`@query_handler(X)` do **not** statically verify
+  the decorated class actually implements `CommandHandler[X, R]` for the
+  right `R` — confirmed empirically: a generic decorator factory can't
+  express "constrain the decorated class against the type argument from
+  an earlier call" precisely enough for current mypy (a `Protocol` with a
+  generic `__call__` looked like the right tool; mypy rejects matching a
+  plain function against it). Each handler's own `if TYPE_CHECKING:
+  _conforms_to_command_handler: type[CommandHandler[X, R]] = TheUseCase`
+  line is what closes that gap statically — the same pattern this
+  template already uses for every port (`application/ports/*.py`).
+- Forgetting the decorator entirely, or registering two handlers for the
+  same command, both raise a clear `ValueError` — naming the class or the
+  command type — the moment `CommandBus`/`QueryBus` is constructed, not a
+  bare `KeyError` at request time. See `tests/unit/test_bus.py`.
+
+**Commands and queries get exactly one handler; events don't.** A command
+asks for one specific thing to happen and one result back — `CommandBus`
+enforces "exactly one" as a real invariant (see above). A domain event
+announces something already happened, and dispatching it (`shared
+/infrastructure/events.py::publish`, via abxbus) fans out to *every*
+subscriber, including zero of them; nobody publishing an event should have
+to know or care how many things react to it.
+
+**Why the buses are `providers.Factory`, not `providers.Singleton`, in
+`containers.py`, even though that means every request rebuilds every
+handler:** one of them —`RegisterBooksBatchUseCase` — holds a
+`CatalogTransaction` bound to one open session for its one call (see
+[Anti-Corruption Layer](#anti-corruption-layer)'s neighbor concepts and
+`application/ports/transaction.py`). Making the bus a `Singleton` would
+make that use case, and the one transaction object it holds, shared
+forever across every request — two concurrent batch-registration requests
+would then race on the same session. The other six handlers would be
+perfectly safe to share; keeping all seven the same shape (`Factory`) is a
+deliberate trade of a little repeated object construction (cheap — no I/O)
+against not having six safe providers and one unsafe one that looks
+identical in `containers.py`.
 `OrderQueryService` the same way `catalog` has one, if and when `ordering`
 grows a page that needs it.
